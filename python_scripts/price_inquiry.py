@@ -4,9 +4,11 @@ import requests
 import time
 import io
 
-# 强制标准输出使用 UTF-8 编码，防止 Windows 下的乱码问题
+# 强制标准输入输出使用 UTF-8 编码，防止 Windows 下的乱码问题
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+if sys.stdin.encoding != 'utf-8':
+    sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
 
 def build_inquiry_payload(params):
     """
@@ -80,7 +82,14 @@ def build_inquiry_payload(params):
         "isBonusAdjustInitPrice": is_bonus_adjust
     }
 
-def fetch_security_pool(input_query=""):
+def get_auth_header(token):
+    if not token:
+        return "Bearer MrlW2aF3yGGLRywpU3eijcYztNduwbIh"
+    if token.startswith("Bearer "):
+        return token
+    return f"Bearer {token}"
+
+def fetch_security_pool(input_query="", token=None):
     url = "https://cust.adentrd.com/trs-cust-gateway/trs-option-core/quote-order/security"
     
     timestamp = int(time.time() * 1000)
@@ -94,7 +103,7 @@ def fetch_security_pool(input_query=""):
     
     headers = {
         "Accept": "application/json, text/plain, */*",
-        "Authorization": "Bearer 2Xn5CSXXxyxXB6IGvz1KX0yOSCpyNEk2",
+        "Authorization": get_auth_header(token),
         "Content-Type": "application/json;charset=UTF-8",
         "Origin": "https://gray.adentrd.com",
         "Referer": "https://gray.adentrd.com/",
@@ -116,7 +125,7 @@ def fetch_security_pool(input_query=""):
             "error": str(e)
         }
 
-def create_new_inquiry(input_data):
+def create_new_inquiry(input_data, token=None):
     url = "https://cust.adentrd.com/trs-cust-gateway/trs-option-core/quote-order/createNew"
     
     # 构建最终负载
@@ -125,7 +134,7 @@ def create_new_inquiry(input_data):
         "Accept": "application/json, text/plain, */*",
         "Accept-Encoding": "gzip, deflate, br, zstd",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-        "Authorization": "Bearer 2Xn5CSXXxyxXB6IGvz1KX0yOSCpyNEk2",
+        "Authorization": get_auth_header(token),
         "Content-Type": "application/json;charset=UTF-8",
         "Origin": "https://gray.adentrd.com",
         "Referer": "https://gray.adentrd.com/",
@@ -160,7 +169,7 @@ def mock_search(query):
         {"site": "系统 B", "price": "￥1,250", "stock": "有货", "update_time": "5分钟前"}
     ]
 
-def fetch_quote_list(page=1, page_size=10, security_code=""):
+def fetch_quote_list(page=1, page_size=10, security_code="", token=None):
     url = "https://cust.adentrd.com/trs-cust-gateway/trs-option-core/quote-order/list"
     
     timestamp = int(time.time() * 1000)
@@ -177,7 +186,7 @@ def fetch_quote_list(page=1, page_size=10, security_code=""):
     
     headers = {
         "Accept": "application/json, text/plain, */*",
-        "Authorization": "Bearer 2Xn5CSXXxyxXB6IGvz1KX0yOSCpyNEk2",
+        "Authorization": get_auth_header(token),
         "Content-Type": "application/json;charset=UTF-8",
         "Origin": "https://gray.adentrd.com",
         "Referer": "https://gray.adentrd.com/",
@@ -208,21 +217,38 @@ if __name__ == "__main__":
     
     if action == "search":
         query = sys.argv[2] if len(sys.argv) > 2 else ""
-        result = fetch_security_pool(query)
+        token = sys.argv[3] if len(sys.argv) > 3 else None
+        result = fetch_security_pool(query, token)
         print(json.dumps(result, ensure_ascii=False))
     elif action == "create":
-        body_str = sys.argv[2] if len(sys.argv) > 2 else "{}"
+        # 从 stdin 读取 body，避免 Windows 命令行转义问题
         try:
+            token = sys.argv[2] if len(sys.argv) > 2 else None
+            body_str = sys.stdin.read().strip()
+            
+            if not body_str:
+                body_str = "{}"
+            
+            # 尝试解析 JSON
             body_data = json.loads(body_str)
-            result = create_new_inquiry(body_data)
+            result = create_new_inquiry(body_data, token)
             print(json.dumps(result, ensure_ascii=False))
         except Exception as e:
-            print(json.dumps({"success": False, "error": f"Invalid JSON body: {str(e)}"}))
+            # 如果解析失败，返回详细的错误信息
+            import traceback
+            error_detail = traceback.format_exc()
+            print(json.dumps({
+                "success": False, 
+                "error": f"Invalid JSON body: {str(e)}",
+                "detail": error_detail,
+                "received_content": body_str if 'body_str' in locals() else "None"
+            }, ensure_ascii=False))
     elif action == "list":
         page = int(sys.argv[2]) if len(sys.argv) > 2 else 1
         page_size = int(sys.argv[3]) if len(sys.argv) > 3 else 10
         security_code = sys.argv[4] if len(sys.argv) > 4 else ""
-        result = fetch_quote_list(page, page_size, security_code)
+        token = sys.argv[5] if len(sys.argv) > 5 else None
+        result = fetch_quote_list(page, page_size, security_code, token)
         print(json.dumps(result, ensure_ascii=False))
     else:
         print(json.dumps({"error": f"Unknown action: {action}"}))

@@ -31,7 +31,6 @@ const tokenExpiryMessage = ref("");
 const loading = ref(false);
 const query = ref("");
 const historySearchQuery = ref(""); // New state for history filtering
-const results = ref<any[]>([]);
 const securityPool = ref<any[]>([]);
 const showDropdown = ref(false);
 const history = ref<any[]>([]);

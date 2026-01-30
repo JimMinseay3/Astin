@@ -258,6 +258,8 @@ const handleCreate = async () => {
   let failCount = 0;
   let lastError = "";
 
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
   try {
     // 准备基础参数
     let notional = 500;
@@ -270,10 +272,19 @@ const handleCreate = async () => {
     // 分拆逻辑：标的每 5 个一组，结构每 3 个一组
     const securityChunks = chunkArray(formData.securities, 5);
     const structureChunks = chunkArray(formData.structures, 3);
-    const totalRequests = securityChunks.length * structureChunks.length;
+    
+    let isFirstRequest = true;
 
     for (const sChunk of securityChunks) {
       for (const stChunk of structureChunks) {
+        // 如果不是第一个请求，则添加随机延迟（1~2.5秒）
+        if (!isFirstRequest) {
+          const delay = Math.floor(Math.random() * (2500 - 1000 + 1)) + 1000;
+          console.log(`Waiting ${delay}ms before next request...`);
+          await sleep(delay);
+        }
+        isFirstRequest = false;
+
         const payload = {
           securities: sChunk.map(s => ({
             securityCode: s.securityCode,

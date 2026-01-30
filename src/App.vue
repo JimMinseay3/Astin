@@ -215,9 +215,9 @@ const lastRefreshTime = ref(new Date());
 const startAutoRefresh = () => {
   if (autoRefreshTimer.value) clearTimeout(autoRefreshTimer.value);
   
-  // 随机刷新间隔：30秒到90秒之间，模拟人为操作
-  const minInterval = 30000;
-  const maxInterval = 90000;
+  // 随机刷新间隔：3秒到10秒之间
+  const minInterval = 3000;
+  const maxInterval = 10000;
   const randomInterval = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
   
   autoRefreshTimer.value = setTimeout(async () => {
@@ -428,10 +428,10 @@ const formatQuoteText = (item: any, id: string) => {
   item.inquiryItems.forEach((inquiry: any) => {
     const bestQuote = getBestQuote(inquiry.quoteItems);
     if (bestQuote) {
-      // 3. 期限格式转换 (M1 -> 1M)
+      // 3. 期限格式转换 (M1 -> 1M, W2 -> 2W)
       let displayLimit = inquiry.dateLimit;
-      if (displayLimit.startsWith('M')) {
-        displayLimit = displayLimit.substring(1) + 'M';
+      if (displayLimit.startsWith('M') || displayLimit.startsWith('W')) {
+        displayLimit = displayLimit.substring(1) + displayLimit.charAt(0);
       }
 
       allQuotes.push({

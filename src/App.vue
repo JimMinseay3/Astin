@@ -5,7 +5,6 @@ import {
   Home,
   LayoutDashboard, 
   History, 
-  Settings, 
   Search, 
   ExternalLink,
   ChevronRight,
@@ -23,10 +22,10 @@ import {
 } from "lucide-vue-next";
 
 // State
-const currentTab = ref('home'); // 'home', 'inquiry', 'history', 'settings'
-const token = ref('MrlW2aF3yGGLRywpU3eijcYztNduwbIh');
-const isTokenExpired = ref(false);
-const tokenExpiryMessage = ref("");
+const currentTab = ref('home'); // 'home', 'inquiry'
+const token = ref('');
+const isTokenExpired = ref(true); // 默认设置为 true，直到用户认证通过
+const tokenExpiryMessage = ref("请先完成用户认证（更新 Token）以获取数据");
 
 const loading = ref(false);
 const query = ref("");
@@ -38,6 +37,9 @@ const totalHistory = ref(0);
 const pageSize = ref(100); // Set to a large number to effectively disable pagination from UI perspective
 const currentPage = ref(1);
 const createLoading = ref(false);
+const inquiryProgress = ref(0);
+const currentInquiryTarget = ref("");
+const showInquirySuccess = ref(false);
 const expandedRows = ref<string[]>([]);
 const globalMarkup = ref<number | null>(1.0); // 全局加价，默认为 1.0
 
@@ -134,6 +136,11 @@ const handleInputSearch = async () => {
     return;
   }
   
+  if (isTokenExpired.value) {
+    console.log("Token 已过期，跳过搜索");
+    return;
+  }
+  
   try {
     const response: any = await invoke("fetch_price", { 
       query: query.value.trim(),
@@ -170,6 +177,12 @@ const handleInputSearch = async () => {
 
 
 const fetchHistory = async (isAuto = false) => {
+  // 如果 Token 为空或已过期，不执行请求
+  if (!token.value || isTokenExpired.value) {
+    if (!isAuto) console.log("Token 未设置或已过期，跳过获取历史记录");
+    return;
+  }
+
   if (!isAuto) loading.value = true;
   try {
     const response: any = await invoke("fetch_quote_list", { 
@@ -253,6 +266,12 @@ const handleCreate = async () => {
   }
   
   createLoading.value = true;
+  inquiryProgress.value = 0;
+  currentInquiryTarget.value = "准备提交询价请求...";
+  showInquirySuccess.value = false;
+  
+  // 强制 UI 刷新
+  await new Promise(resolve => setTimeout(resolve, 50));
   let successCount = 0;
   let failCount = 0;
   let lastError = "";
@@ -272,10 +291,17 @@ const handleCreate = async () => {
     const securityChunks = chunkArray(formData.securities, 5);
     const structureChunks = chunkArray(formData.structures, 3);
     
+    const totalChunks = securityChunks.length * structureChunks.length;
+    let completedChunks = 0;
     let isFirstRequest = true;
 
     for (const sChunk of securityChunks) {
+      // 获取当前正在处理的标的名称列表
+      const targetNames = sChunk.map(s => s.securityName).join(', ');
+      
       for (const stChunk of structureChunks) {
+        currentInquiryTarget.value = `正在提交: ${targetNames}...`;
+        
         // 如果不是第一个请求，则添加随机延迟（1~2.5秒）
         if (!isFirstRequest) {
           const delay = Math.floor(Math.random() * (2500 - 1000 + 1)) + 1000;
@@ -300,6 +326,9 @@ const handleCreate = async () => {
           token: token.value
         });
         
+        completedChunks++;
+        inquiryProgress.value = Math.floor((completedChunks / totalChunks) * 100);
+
         if (response.success && response.data && response.data.success) {
           if (response.data.data && response.data.data.msgType === "A_STOCK_AFTERNOON_STOP") {
             lastError = "提示：沪深A股交易时间已结束，当前平台已停止询价。";
@@ -320,22 +349,23 @@ const handleCreate = async () => {
     }
     
     if (successCount > 0) {
-      // Reset form
+      showInquirySuccess.value = true;
+      currentInquiryTarget.value = failCount === 0 ? "全部询价申请提交成功！" : `部分提交成功 (${successCount} 成功, ${failCount} 失败)`;
+      
+      // 清空已选标的
       formData.securities = [];
-      formData.dateLimits = [];
-      formData.structures = [];
-      formData.specialRequirements = [];
-      formData.notionalPrincipal = 500;
-      formData.customNotional = null;
       
       // Refresh list
       fetchHistory();
       
-      if (failCount === 0) {
-        alert(`询价申请提交成功！(共 ${successCount} 组)`);
-      } else {
-        alert(`部分提交成功：${successCount} 组成功，${failCount} 组失败。\n最后一次错误：${lastError}`);
-      }
+      // 3秒后隐藏进度条成功状态
+      setTimeout(() => {
+        if (!createLoading.value) {
+          showInquirySuccess.value = false;
+          inquiryProgress.value = 0;
+          currentInquiryTarget.value = "";
+        }
+      }, 5000);
     } else {
       alert("提交询价失败: " + lastError);
     }
@@ -375,31 +405,6 @@ const handleUpdateToken = (newToken: string) => {
   tokenExpiryMessage.value = "";
   // 可以在此处保存到 localStorage 或后端
   fetchHistory(); // 更新后尝试刷新
-};
-
-const validateToken = async () => {
-  loading.value = true;
-  try {
-    const response: any = await invoke("fetch_quote_list", { 
-      page: 1, 
-      pageSize: 1,
-      securityCode: "",
-      token: token.value
-    });
-    if (response.success && response.data && response.data.success) {
-      isTokenExpired.value = false;
-      tokenExpiryMessage.value = "";
-      alert("身份验证成功！");
-    } else {
-      isTokenExpired.value = true;
-      tokenExpiryMessage.value = "验证失败，Token 可能已过期。";
-    }
-  } catch (error) {
-    console.error("Token validation failed:", error);
-    alert("验证时发生错误");
-  } finally {
-    loading.value = false;
-  }
 };
 
 const getGroupedInquiryItems = (inquiryItems: any[]) => {
@@ -520,19 +525,6 @@ const handleCopy = async (item: any, id: string) => {
           </button>
         </nav>
       </div>
-
-      <div class="mt-auto p-6 space-y-4">
-        <nav>
-          <button 
-            @click="currentTab = 'settings'"
-            :class="currentTab === 'settings' ? 'bg-blue-600/10 text-blue-400 font-medium' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'"
-            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all group"
-          >
-            <Settings class="w-5 h-5 group-hover:text-blue-400" />
-            <span>应用设置</span>
-          </button>
-        </nav>
-      </div>
     </aside>
 
     <!-- Main Content -->
@@ -541,13 +533,8 @@ const handleCopy = async (item: any, id: string) => {
       <header class="h-16 border-b border-slate-800 flex items-center justify-between px-8 bg-[#0f172a]/80 backdrop-blur-md z-10">
         <div class="flex items-center gap-4">
           <h2 class="text-lg font-semibold text-slate-100">
-            {{ currentTab === 'home' ? '应用主页' : currentTab === 'inquiry' ? '实时询价' : '应用设置' }}
+            {{ currentTab === 'home' ? '应用主页' : '实时询价' }}
           </h2>
-          <!-- Token Expiry Alert in Header -->
-          <div v-if="isTokenExpired" class="flex items-center gap-2 px-3 py-1 bg-red-500/10 border border-red-500/20 rounded-full text-red-400 animate-pulse">
-            <ShieldAlert class="w-4 h-4" />
-            <span class="text-xs font-medium">{{ tokenExpiryMessage || '认证已过期' }}</span>
-          </div>
         </div>
         <div class="flex items-center gap-4">
           <div class="w-8 h-8 rounded-full bg-slate-700 border border-slate-600 flex items-center justify-center text-[10px] font-bold text-slate-400">
@@ -567,16 +554,6 @@ const handleCopy = async (item: any, id: string) => {
               <ShieldAlert v-else class="w-48 h-48 text-red-500" />
             </div>
 
-            <div v-if="isTokenExpired" class="mb-6 animate-in fade-in slide-in-from-top-4 duration-300">
-              <div class="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex items-start gap-3">
-                <ShieldAlert class="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-                <div class="space-y-1">
-                  <h4 class="text-sm font-bold text-red-400">Token 状态异常</h4>
-                  <p class="text-xs text-red-400/80 leading-relaxed">{{ tokenExpiryMessage || '检测到您的身份认证已过期或无效。为了确保功能正常使用，请在下方更新您的 Token 并点击“立即验证”。' }}</p>
-                </div>
-              </div>
-            </div>
-
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
               <div class="space-y-2">
                 <div class="flex items-center gap-3">
@@ -586,17 +563,12 @@ const handleCopy = async (item: any, id: string) => {
                   </div>
                   <div>
                     <h3 class="text-xl font-bold text-white">身份验证状态</h3>
-                    <p :class="!isTokenExpired ? 'text-green-400/80' : 'text-red-400/80'" class="text-sm font-medium">
-                      {{ !isTokenExpired ? '身份认证已通过，可以正常使用各项服务' : '身份认证已过期，请及时更新 Token' }}
+                    <p :class="[!isTokenExpired ? 'text-green-400/80' : 'text-red-400/80', isTokenExpired ? 'animate-pulse' : '']" class="text-sm font-medium">
+                      {{ !isTokenExpired ? '身份认证已通过，欢迎您的使用' : '身份认证已过期，请及时更新 Token' }}
                     </p>
                   </div>
                 </div>
               </div>
-              <button @click="validateToken" :disabled="loading" class="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl font-bold transition-all flex items-center gap-2 shadow-lg shadow-blue-600/20">
-                <Loader2 v-if="loading" class="w-4 h-4 animate-spin" />
-                <RefreshCw v-else class="w-4 h-4" />
-                立即验证
-              </button>
             </div>
           </div>
 
@@ -834,9 +806,37 @@ const handleCopy = async (item: any, id: string) => {
                   </div>
                 </div>
 
-                <!-- Submit Button -->
-                <div class="pt-6 border-t border-slate-700/50 flex justify-end">
-                  <div class="flex flex-col items-end gap-2">
+                <!-- Submit Button & Progress -->
+                <div class="pt-6 border-t border-slate-700/50 flex items-center justify-between gap-8">
+                  <!-- Progress UI -->
+                  <div v-if="createLoading || showInquirySuccess" class="flex-1 max-w-2xl animate-in fade-in slide-in-from-left-4 duration-500">
+                    <div class="flex items-center justify-between mb-2.5">
+                      <div class="flex items-center gap-3 overflow-hidden">
+                        <div v-if="createLoading" class="w-2 h-2 rounded-full bg-blue-500 animate-pulse shrink-0"></div>
+                        <Check v-else class="w-4 h-4 text-green-500 shrink-0" />
+                        <span class="text-sm font-bold text-slate-200 truncate">
+                          {{ currentInquiryTarget }}
+                        </span>
+                      </div>
+                      <span class="text-sm font-black text-blue-400 tabular-nums">{{ inquiryProgress }}%</span>
+                    </div>
+                    <div class="h-3 w-full bg-slate-900/80 rounded-full overflow-hidden border border-slate-700/50 p-0.5 shadow-inner">
+                      <div 
+                        class="h-full rounded-full bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-500 transition-all duration-500 ease-out relative shadow-lg"
+                        :style="{ width: `${inquiryProgress}%` }"
+                      >
+                        <!-- Shimmer effect -->
+                        <div class="absolute inset-0 bg-[length:40px_40px] bg-[linear-gradient(45deg,rgba(255,255,255,0.15)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.15)_50%,rgba(255,255,255,0.15)_75%,transparent_75%,transparent)] animate-[shimmer_2s_infinite]"></div>
+                      </div>
+                    </div>
+                    <div v-if="showInquirySuccess" class="mt-2 flex items-center gap-2 text-xs font-bold text-green-400 animate-in fade-in slide-in-from-top-2">
+                      <div class="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                      <span>所有标的询价已成功推送到队列</span>
+                    </div>
+                  </div>
+                  <div v-else class="flex-1"></div>
+
+                  <div class="flex flex-col items-end gap-2 shrink-0">
                     <button 
                       @click="handleCreate"
                       :disabled="createLoading || formData.securities.length === 0 || formData.dateLimits.length === 0 || formData.structures.length === 0"
@@ -844,7 +844,7 @@ const handleCopy = async (item: any, id: string) => {
                     >
                       <Loader2 v-if="createLoading" class="w-6 h-6 animate-spin" />
                       <Send v-else class="w-5 h-5" />
-                      <span>立即开始询价</span>
+                      <span>{{ createLoading ? '正在批量提交...' : '立即开始询价' }}</span>
                     </button>
                     <p v-if="formData.securities.length === 0" class="text-[10px] text-amber-500 font-medium">请先从搜索结果中选择标的</p>
                     <p v-else-if="formData.dateLimits.length === 0 || formData.structures.length === 0" class="text-[10px] text-amber-500 font-medium">请选择询价期限和结构</p>
@@ -930,12 +930,6 @@ const handleCopy = async (item: any, id: string) => {
                     class="w-64 bg-slate-800/50 border border-slate-700 rounded-xl py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all"
                   >
                 </div>
-                <button 
-                  @click="history = []; totalHistory = 0"
-                  class="text-xs font-medium text-slate-500 hover:text-red-400 transition-colors"
-                >
-                  清除记录
-                </button>
               </div>
             </div>
 
@@ -1124,44 +1118,6 @@ const handleCopy = async (item: any, id: string) => {
               </div>
             </div>
           </section>
-        </div>
-
-        <!-- Settings Tab -->
-        <div v-if="currentTab === 'settings'" class="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
-          <div class="bg-slate-800/40 border border-slate-700/50 rounded-3xl p-8 backdrop-blur-sm">
-            <h3 class="text-xl font-bold text-white mb-6">应用设置</h3>
-            <div class="space-y-6">
-              <!-- Markup Setting -->
-              <div class="flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl border border-slate-700">
-                <div class="space-y-1">
-                  <h4 class="font-bold text-slate-200">默认加价比例</h4>
-                  <p class="text-xs text-slate-500">全局生效的默认加价百分比</p>
-                </div>
-                <div class="flex items-center gap-3">
-                  <input 
-                    v-model.number="globalMarkup" 
-                    type="number" 
-                    step="0.1"
-                    class="w-24 bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-blue-400 font-bold focus:outline-none focus:border-blue-500"
-                  >
-                  <span class="text-slate-400 font-bold">%</span>
-                </div>
-              </div>
-
-              <!-- Other Settings could go here -->
-              <div class="p-4 bg-slate-900/50 rounded-2xl border border-slate-700 opacity-50 cursor-not-allowed">
-                <div class="flex items-center justify-between">
-                  <div class="space-y-1">
-                    <h4 class="font-bold text-slate-200">自动清理历史</h4>
-                    <p class="text-xs text-slate-500">超过 30 天的记录将自动移除 (开发中)</p>
-                  </div>
-                  <div class="w-12 h-6 bg-slate-700 rounded-full relative">
-                    <div class="absolute left-1 top-1 w-4 h-4 bg-slate-500 rounded-full"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </main>

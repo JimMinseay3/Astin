@@ -383,8 +383,28 @@ const getBestQuote = (quoteItems: any[]) => {
   return quoteItems.find((q: any) => q.price === minPrice);
 };
 
+const getTValue = (createTimeStr: string, earliestDateStr: string) => {
+  if (!createTimeStr || !earliestDateStr) return 'T+5';
+  
+  try {
+    const createDate = new Date(createTimeStr.split(' ')[0]);
+    const earliestDate = new Date(earliestDateStr.split(' ')[0]);
+    
+    createDate.setHours(0, 0, 0, 0);
+    earliestDate.setHours(0, 0, 0, 0);
+    
+    const diffTime = earliestDate.getTime() - createDate.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+    
+    return diffDays <= 3 ? 'T+1' : 'T+5';
+  } catch (e) {
+    return 'T+5';
+  }
+};
+
 const copyStatus = ref<Record<string, boolean>>({});
 const markupValues = ref<Record<string, number | null>>({});
+const tOneEnabled = ref<Record<string, boolean>>({});
 
 const getMarkup = (id: string) => {
   const val = markupValues.value[id];
@@ -466,9 +486,12 @@ const formatQuoteText = (item: any, id: string) => {
   const isMainBoard = item.securityCode.startsWith('60') || item.securityCode.startsWith('00');
   const knockoutRule = isMainBoard ? '連3板敲出' : '連2板敲出';
 
+  // 根据 tOneEnabled 状态决定显示 T+1 还是 T+5，默认为 T+5
+  const tValue = tOneEnabled.value[id] ? 'T+1' : 'T+5';
+
   text += `\n盤中股價漲跌5%以上本報價無效\n`;
   text += `敲出規則：${knockoutRule}\n`;
-  text += `最快時間：T+5`;
+  text += `最快時間：${tValue}`;
 
   return text;
 };
@@ -1042,11 +1065,20 @@ const handleCopy = async (item: any, id: string) => {
                                   </div>
 
                                   <!-- Best Badge -->
-                                  <div class="flex-shrink-0">
+                                  <div class="flex-shrink-0 flex flex-col items-center gap-2">
                                     <div class="px-3 py-1 bg-green-500/10 text-green-400 border border-green-500/20 text-[10px] font-black rounded-lg uppercase tracking-wider">
                                       Best Choice
                                     </div>
-                                  </div>
+                                    <div v-if="getBestQuote(inquiry.quoteItems).earliestExerciseDate" 
+                                        :class="getTValue(item.createTime, getBestQuote(inquiry.quoteItems).earliestExerciseDate) === 'T+1' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'"
+                                        class="px-2 py-0.5 border text-[10px] font-black rounded-md uppercase tracking-wider">
+                                        最早可行权日: {{ getTValue(item.createTime, getBestQuote(inquiry.quoteItems).earliestExerciseDate) }}
+                                      </div>
+                                     <div v-if="getBestQuote(inquiry.quoteItems).refExpDate" 
+                                        class="px-2 py-0.5 bg-slate-500/10 text-slate-400 border border-slate-500/20 text-[10px] font-black rounded-md uppercase tracking-wider">
+                                        参考到期日: {{ getBestQuote(inquiry.quoteItems).refExpDate }}
+                                      </div>
+                                   </div>
                                 </div>
                                 <div v-else class="p-8 text-center bg-slate-800/20">
                                   <Loader2 class="w-5 h-5 animate-spin inline-block text-slate-600 mb-2" />
@@ -1073,16 +1105,25 @@ const handleCopy = async (item: any, id: string) => {
                                   <span class="text-[10px] font-bold text-slate-500 ml-1">】%</span>
                                 </div>
                               </div>
-                              <button 
-                                @click.stop="handleCopy(item, getRowId(item, index))"
+                              <div class="flex items-center gap-2">
+                                <button 
+                                  @click="tOneEnabled[getRowId(item, index)] = !tOneEnabled[getRowId(item, index)]"
+                                  class="flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all text-[10px] font-black uppercase tracking-wider border"
+                                  :class="tOneEnabled[getRowId(item, index)] ? 'text-amber-400 bg-amber-400/10 border-amber-400/30' : 'text-slate-500 bg-slate-800/50 border-slate-700 hover:text-slate-400'"
+                                >
+                                  {{ tOneEnabled[getRowId(item, index)] ? 'T+1 已开启' : 'T+1 启用' }}
+                                </button>
+                                <button 
+                                  @click.stop="handleCopy(item, getRowId(item, index))"
                                 class="flex items-center gap-2 px-3 py-1 rounded-lg transition-all text-xs font-bold"
                                 :class="copyStatus[getRowId(item, index)] ? 'text-green-400 bg-green-400/10' : 'text-blue-400 bg-blue-400/10 hover:bg-blue-400/20'"
                               >
                                 <Check v-if="copyStatus[getRowId(item, index)]" class="w-3.5 h-3.5" />
                                 <Copy v-else class="w-3.5 h-3.5" />
                                 {{ copyStatus[getRowId(item, index)] ? '已复制' : '复制文本' }}
-                              </button>
-                            </div>
+                               </button>
+                             </div>
+                           </div>
                             <div class="bg-slate-950/50 rounded-2xl p-6 border border-slate-800 shadow-inner group relative">
                               <pre class="text-xs font-mono text-slate-400 leading-relaxed whitespace-pre-wrap">{{ formatQuoteText(item, getRowId(item, index)) }}</pre>
                               <div class="absolute inset-0 bg-gradient-to-t from-slate-950/20 to-transparent pointer-events-none rounded-2xl"></div>

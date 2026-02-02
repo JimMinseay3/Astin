@@ -50,7 +50,7 @@ wheels/
 
 # Tauri & Rust
 src-tauri/target/
-src-tauri/python_scripts/*.exe
+*.exe
 
 # App specific
 inquiry_report_full.txt
